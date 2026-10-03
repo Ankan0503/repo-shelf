@@ -37,7 +37,7 @@ Click **edit** in the panel.
 
 - **Add a folder** with the name box, **×** removes one.
 - **Search** narrows the list inside whichever folder is selected.
-- **Pick a folder** in the list, then tick repositories in the page to put them in it.
+- **Pick a folder** in the list. The page then shows *every* repository, each with a tick for that folder — tick to add, untick to remove.
 - **Copy config** puts the whole thing on your clipboard as JSON.
 - Paste it into `shelf/shelf.config.json` in your profile repo and commit.
 

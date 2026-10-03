@@ -321,8 +321,21 @@
     return state.folders[Number(id)]?.repos || [];
   }
 
+  // Which repos are on screen. Browsing a folder shows its members; editing one
+  // shows everything, because the ticks live on the rows and a new folder has no
+  // members — filtering to them would hide every row you need to tick.
+  function onScreen() {
+    return editingFolder() ? state.repos : visible(state.active);
+  }
+
+  function editingFolder() {
+    return state.editing && state.active !== "all" && state.active !== "unsorted"
+      ? state.folders[Number(state.active)]
+      : null;
+  }
+
   function applyFilter() {
-    const keep = new Set(visible(state.active).map((r) => r.lower));
+    const keep = new Set(onScreen().map((r) => r.lower));
     const q = (state.search || "").trim().toLowerCase();
     state.repos.forEach((r) => {
       const show = keep.has(r.lower) && (!q || r.lower.includes(q));
@@ -337,48 +350,43 @@
   }
 
   function shown() {
-    const keep = new Set(visible(state.active).map((r) => r.lower));
+    const keep = new Set(onScreen().map((r) => r.lower));
     const q = (state.search || "").trim().toLowerCase();
     return state.repos.filter((r) => keep.has(r.lower) && (!q || r.lower.includes(q)));
   }
 
-  // In edit mode every visible row gets a tick for the folder being edited.
-  // A repo matched by topic is shown ticked but disabled: unticking it would
-  // mean removing the topic from the repo, which needs write access this
-  // extension deliberately does not have.
+  // In edit mode every row gets a tick for the folder being edited, ticked when
+  // that folder already holds the repo. The whole list is shown while editing,
+  // not just the folder's members, because a folder you just made has none.
   function renderRowControls() {
-    const editingFolder =
-      state.editing && state.active !== "all" && state.active !== "unsorted"
-        ? state.folders[Number(state.active)]
-        : null;
+    const folderBeingEdited = editingFolder();
 
     state.repos.forEach((r) => {
       r.el.querySelector(".shelf-tick")?.remove();
-      if (!editingFolder) return;
+      if (!folderBeingEdited) return;
+      const fld = folderBeingEdited;
 
-      const folder = editingFolder.key;
-      const byTopic = r.topics.some((t) => (editingFolder.tags || []).includes(t));
+      const folder = fld.key;
+      const byTopic = r.topics.some((t) => (fld.tags || []).includes(t));
       const picked = (state.draft.picks[folder] || []).some((n) => n.toLowerCase() === r.lower);
       const dropped = (state.draft.drops[folder] || []).some((n) => n.toLowerCase() === r.lower);
-      const inConfig = (editingFolder.named || []).includes(r.lower);
+      const inConfig = (fld.named || []).includes(r.lower);
 
       // Nothing is locked. Unticking a repo that a topic put here records an
       // exclusion rather than editing the repo's topics, which would need write
       // access this extension does not have. The topic stays on the repo; the
       // folder simply stops claiming it.
-      const excluded = (editingFolder.excluded || []).includes(r.lower);
+      const excluded = (fld.excluded || []).includes(r.lower);
       const checked = !excluded && !dropped && (byTopic || picked || inConfig);
 
       const label = document.createElement("label");
       label.className = "shelf-tick";
       label.title = checked
         ? byTopic
-          ? `Remove ${r.name} from ${editingFolder.name} — the repo keeps its topic`
-          : `Remove ${r.name} from ${editingFolder.name}`
-        : `Add ${r.name} to ${editingFolder.name}`;
-      label.innerHTML = `<input type="checkbox" ${checked ? "checked" : ""}><span>${esc(
-        editingFolder.name
-      )}</span>`;
+          ? `Remove ${r.name} from ${fld.name} — the repo keeps its topic`
+          : `Remove ${r.name} from ${fld.name}`
+        : `Add ${r.name} to ${fld.name}`;
+      label.innerHTML = `<input type="checkbox" ${checked ? "checked" : ""}><span>${esc(fld.name)}</span>`;
 
       label.querySelector("input").addEventListener("change", async (e) => {
         const picks = state.draft.picks[folder] || [];
@@ -467,8 +475,14 @@
                <button data-reset ${n ? "" : "disabled"}>Discard</button>
              </div>
              <p class="shelf-note">${
-               n
-                 ? "Pick a folder above, then tick repositories. Copy the config into <code>shelf/shelf.config.json</code> in your profile repo to publish it."
+               editingFolder()
+                 ? `Showing every repository — tick one to put it in <b>${esc(
+                     editingFolder().name
+                   )}</b>.${
+                     n
+                       ? " Copy the config into <code>shelf/shelf.config.json</code> in your profile repo to publish."
+                       : ""
+                   }`
                  : "Pick a folder above, then tick repositories in the list."
              }</p>`
           : `<p class="shelf-note">${
