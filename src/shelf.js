@@ -15,7 +15,7 @@
 // markup. The page's tags are only a fallback when the API is unreachable.
 
 (() => {
-  const CACHE_MS = 5 * 60 * 1000;
+  const CACHE_MS = 60 * 1000;
   // GitHub's own topic format: lowercase letters and digits, single hyphens.
   const NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
   const NAME_MAX = 50;
@@ -78,13 +78,15 @@
   }
 
   // Authoritative topics, because the page's tags are capped at seven per repo.
-  async function loadTopics(owner) {
+  async function loadTopics(owner, fresh = false) {
     const key = `shelf:topics:${owner}`;
-    try {
-      const hit = JSON.parse(sessionStorage.getItem(key) || "null");
-      if (hit && Date.now() - hit.at < CACHE_MS) return hit.map;
-    } catch {
-      /* private windows can throw; fetch instead */
+    if (!fresh) {
+      try {
+        const hit = JSON.parse(sessionStorage.getItem(key) || "null");
+        if (hit && Date.now() - hit.at < CACHE_MS) return hit.map;
+      } catch {
+        /* private windows can throw; fetch instead */
+      }
     }
     const map = {};
     try {
@@ -201,6 +203,21 @@
     };
   }
 
+  // Topics are read once and briefly cached, so a topic added on GitHub after
+  // the page loaded isn't seen until they are fetched again. Sync does that.
+  async function syncTopics() {
+    const map = await loadTopics(state.owner, true);
+    if (!map) {
+      state.degraded = true;
+      return false;
+    }
+    state.repos.forEach((r) => {
+      r.topics = map[r.lower] || r.topics;
+    });
+    state.degraded = false;
+    return true;
+  }
+
   // ------------------------------------------------------------------- ui ---
 
   let state = {
@@ -213,7 +230,8 @@
     newName: "",
     degraded: false,
     flash: "",
-    error: ""
+    error: "",
+    syncing: false
   };
 
   // While a folder is being edited every repo is listed, because the ticks
@@ -317,7 +335,12 @@
     side.innerHTML = `
       <div class="shelf-head">
         <span>Folders</span>
-        <button class="shelf-mode" data-mode>${state.editing ? "done" : "edit"}</button>
+        <span class="shelf-btns">
+          <button class="shelf-mode" data-sync title="Fetch repo topics again, so newly added topics are matched"${
+            state.syncing ? " disabled" : ""
+          }>${state.syncing ? "syncing…" : "sync"}</button>
+          <button class="shelf-mode" data-mode>${state.editing ? "done" : "edit"}</button>
+        </span>
       </div>
       <input class="shelf-search" type="search" placeholder="Search repositories…"
              value="${esc(state.search)}" aria-label="Search repositories">
@@ -368,6 +391,22 @@
       })
     );
 
+    side.querySelector("[data-sync]").addEventListener("click", async () => {
+      state.syncing = true;
+      state.flash = "";
+      render();
+      const ok = await syncTopics();
+      state.syncing = false;
+      const matched = state.folders.reduce((n, _, i) => n + members(i).length, 0);
+      state.flash = ok
+        ? `Synced. ${matched} folder placement${matched === 1 ? "" : "s"} across ${state.folders.length} folder${
+            state.folders.length === 1 ? "" : "s"
+          }.`
+        : "GitHub's API didn't answer — try again in a minute.";
+      render();
+      applyFilter(true);
+    });
+
     side.querySelector("[data-mode]").addEventListener("click", () => {
       state.editing = !state.editing;
       state.error = "";
@@ -415,6 +454,7 @@
         state.error = "";
         state.newName = "";
         await saveFolders();
+        await syncTopics();
         render();
         applyFilter(true);
       });

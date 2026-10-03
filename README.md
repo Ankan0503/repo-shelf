@@ -34,6 +34,10 @@ folders; nothing comes preinstalled.
 
 **×** next to a folder deletes it. **Search** narrows whatever is listed.
 
+**Sync** fetches every repo's topics again. Topics are read when the page loads,
+so if you add a topic on GitHub afterwards, press Sync and any folder with that
+name picks the repo up. Creating a folder does this automatically.
+
 ### Folder names
 
 Lowercase letters and numbers joined by single hyphens, up to 50 characters:

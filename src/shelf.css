@@ -245,3 +245,12 @@ label.shelf-tick .shelf-auto {
   background: var(--bgColor-neutral-muted, var(--color-neutral-muted, #eaeef2));
   color: var(--fgColor-muted, var(--color-fg-muted, #59636e));
 }
+
+#shelf-side .shelf-btns {
+  display: inline-flex;
+  gap: 4px;
+}
+#shelf-side .shelf-mode:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
