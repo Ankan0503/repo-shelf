@@ -183,7 +183,7 @@
   // else's page cannot disturb your own.
 
   const draftKey = (owner) => `shelf:draft:${owner.toLowerCase()}`;
-  const emptyDraft = () => ({ folders: [], picks: {}, removed: [], drops: {} });
+  const emptyDraft = () => ({ folders: [], picks: {}, removed: [], drops: {}, excludes: {} });
 
   async function loadDraft(owner) {
     try {
@@ -242,8 +242,18 @@
       const target = out.folders.find((f) => f.name === key);
       if (target) target.repos = (target.repos || []).filter((r) => !lower.includes(r.toLowerCase()));
     }
+    for (const [key, names] of Object.entries(draft.excludes || {})) {
+      const target = out.folders.find((f) => f.name === key);
+      if (!target) continue;
+      const have = (target.exclude || []).map((r) => r.toLowerCase());
+      target.exclude = [
+        ...(target.exclude || []),
+        ...names.filter((n) => !have.includes(n.toLowerCase()))
+      ];
+    }
     out.folders.forEach((f) => {
       if (!f.repos.length) delete f.repos;
+      if (f.exclude && !f.exclude.length) delete f.exclude;
     });
     if (!out.loose.length) delete out.loose;
     if (!out.owner) delete out.owner;
@@ -258,8 +268,9 @@
     for (const f of cfg.folders || []) {
       const tags = (f.tags || []).map((t) => String(t).toLowerCase());
       const named = (f.repos || []).map((r) => String(r).toLowerCase());
+      const excluded = (f.exclude || []).map((r) => String(r).toLowerCase());
       const members = repos.filter((r) => {
-        if (claimed.has(r.lower)) return false;
+        if (claimed.has(r.lower) || excluded.includes(r.lower)) return false;
         return named.includes(r.lower) || r.topics.some((t) => tags.includes(t));
       });
       members.forEach((r) => claimed.add(r.lower));
@@ -269,6 +280,7 @@
         blurb: f.blurb,
         tags,
         named,
+        excluded,
         repos: members
       });
     }
@@ -350,33 +362,40 @@
       const dropped = (state.draft.drops[folder] || []).some((n) => n.toLowerCase() === r.lower);
       const inConfig = (editingFolder.named || []).includes(r.lower);
 
-      // Only a topic match is locked: unfiling that means editing the repo's
-      // topics, which needs write access. A name in the config is just text in
-      // a file, so it can be unticked and removed on the next publish.
-      const checked = byTopic || (!dropped && (picked || inConfig));
+      // Nothing is locked. Unticking a repo that a topic put here records an
+      // exclusion rather than editing the repo's topics, which would need write
+      // access this extension does not have. The topic stays on the repo; the
+      // folder simply stops claiming it.
+      const excluded = (editingFolder.excluded || []).includes(r.lower);
+      const checked = !excluded && !dropped && (byTopic || picked || inConfig);
+
       const label = document.createElement("label");
       label.className = "shelf-tick";
-      label.title = byTopic
-        ? `Filed by a topic this folder matches — remove that topic from the repo to unfile it`
-        : checked
-        ? `Remove ${r.name} from ${editingFolder.name}`
+      label.title = checked
+        ? byTopic
+          ? `Remove ${r.name} from ${editingFolder.name} — the repo keeps its topic`
+          : `Remove ${r.name} from ${editingFolder.name}`
         : `Add ${r.name} to ${editingFolder.name}`;
-      label.innerHTML = `<input type="checkbox" ${checked ? "checked" : ""} ${
-        byTopic ? "disabled" : ""
-      }><span>${esc(editingFolder.name)}</span>`;
+      label.innerHTML = `<input type="checkbox" ${checked ? "checked" : ""}><span>${esc(
+        editingFolder.name
+      )}</span>`;
 
       label.querySelector("input").addEventListener("change", async (e) => {
         const picks = state.draft.picks[folder] || [];
         const drops = state.draft.drops[folder] || [];
+        const excl = state.draft.excludes[folder] || [];
         if (e.target.checked) {
           state.draft.drops[folder] = drops.filter((n) => n.toLowerCase() !== r.lower);
-          if (!inConfig) state.draft.picks[folder] = [...picks, r.name];
+          state.draft.excludes[folder] = excl.filter((n) => n.toLowerCase() !== r.lower);
+          if (!inConfig && !byTopic) state.draft.picks[folder] = [...picks, r.name];
         } else {
           state.draft.picks[folder] = picks.filter((n) => n.toLowerCase() !== r.lower);
-          if (inConfig) state.draft.drops[folder] = [...drops, r.name];
+          if (byTopic) state.draft.excludes[folder] = [...excl, r.name];
+          else if (inConfig) state.draft.drops[folder] = [...drops, r.name];
         }
-        if (!(state.draft.picks[folder] || []).length) delete state.draft.picks[folder];
-        if (!(state.draft.drops[folder] || []).length) delete state.draft.drops[folder];
+        for (const k of ["picks", "drops", "excludes"]) {
+          if (!(state.draft[k][folder] || []).length) delete state.draft[k][folder];
+        }
         await saveDraft(state.owner, state.draft);
         recompute();
         render();
@@ -392,7 +411,8 @@
       (state.draft.folders || []).length +
       (state.draft.removed || []).length +
       Object.values(state.draft.picks || {}).reduce((n, v) => n + v.length, 0) +
-      Object.values(state.draft.drops || {}).reduce((n, v) => n + v.length, 0)
+      Object.values(state.draft.drops || {}).reduce((n, v) => n + v.length, 0) +
+      Object.values(state.draft.excludes || {}).reduce((n, v) => n + v.length, 0)
     );
   }
 

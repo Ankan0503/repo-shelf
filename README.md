@@ -44,9 +44,10 @@ Click **edit** in the panel.
 Your edits live in this browser until you publish them, so nothing is written
 to GitHub and the extension never needs write access or a token.
 
-A repo already filed by a **topic** shows ticked and disabled: unfiling it
-means removing that topic from the repo, which is a change to the repo itself.
-Use `gh repo edit <repo> --remove-topic <tag>` for that.
+Unticking works on everything, including repos a **topic** put in the folder.
+That records an exclusion in the config rather than editing the repo — the
+topic stays where it is, the folder just stops claiming that repo. To drop the
+topic itself instead, use `gh repo edit <repo> --remove-topic <tag>`.
 
 Private repositories and forks can be ticked like any other. A private repo
 will render for **you** and for nobody else — they cannot see the repository at
@@ -89,6 +90,7 @@ account, the same repo whose README shows on your profile:
 | `folders[].blurb` | Tooltip text, optional |
 | `folders[].tags` | Repo **topics** that file a repo into this folder |
 | `folders[].repos` | Repo names, for anything you'd rather not tag |
+| `folders[].exclude` | Repo names this folder ignores even if a tag matches |
 | `loose` | Repos shown in the catch-all folder with no folder of their own |
 | `looseLabel` | Renames that catch-all folder. Defaults to "Other projects" |
 
