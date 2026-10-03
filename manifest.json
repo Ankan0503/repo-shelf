@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Repo Shelf \u2014 folders for GitHub repositories",
+  "version": "0.1.0",
+  "description": "Folders on the GitHub repositories tab, published by the profile owner. Build your own with checkboxes and copy the config out. No account, no server.",
+  "host_permissions": [
+    "https://github.com/*",
+    "https://raw.githubusercontent.com/*",
+    "https://api.github.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://github.com/*"
+      ],
+      "js": [
+        "src/shelf.js"
+      ],
+      "css": [
+        "src/shelf.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": [
+    "clipboardWrite",
+    "storage"
+  ]
+}

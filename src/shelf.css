@@ -1,0 +1,231 @@
+/* Uses GitHub's own Primer CSS variables, so the panel follows whatever theme
+   the viewer has set — light, dark, dimmed or high contrast — without us
+   hardcoding a palette. The fallbacks are the light-theme values. */
+
+#shelf-side {
+  border: 1px solid var(--borderColor-default, var(--color-border-default, #d1d9e0));
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 16px;
+  background: var(--bgColor-muted, var(--color-canvas-subtle, #f6f8fa));
+  font-size: 12px;
+}
+
+#shelf-side .shelf-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 4px 8px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fgColor-muted, var(--color-fg-muted, #59636e));
+}
+
+#shelf-side .shelf-src {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  color: var(--fgColor-muted, var(--color-fg-muted, #59636e));
+  text-decoration: none;
+  opacity: 0.8;
+}
+#shelf-side .shelf-src:hover {
+  text-decoration: underline;
+  opacity: 1;
+}
+
+#shelf-side .shelf-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#shelf-side .shelf-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--fgColor-default, var(--color-fg-default, #1f2328));
+}
+
+#shelf-side .shelf-item:hover {
+  background: var(--bgColor-neutral-muted, var(--color-neutral-muted, #eaeef2));
+}
+
+#shelf-side .shelf-item.is-active {
+  background: var(--bgColor-accent-emphasis, var(--color-accent-emphasis, #0969da));
+  color: var(--fgColor-onEmphasis, #ffffff);
+}
+
+#shelf-side .shelf-item em {
+  font-style: normal;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+#shelf-side .shelf-note {
+  margin: 8px 4px 2px;
+  font-size: 10px;
+  color: var(--fgColor-muted, var(--color-fg-muted, #59636e));
+  opacity: 0.8;
+}
+
+/* --- edit mode ------------------------------------------------------------ */
+
+#shelf-side .shelf-head {
+  align-items: center;
+}
+
+#shelf-side .shelf-mode {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 2px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid var(--borderColor-default, var(--color-border-default, #d1d9e0));
+  background: var(--bgColor-default, var(--color-canvas-default, #ffffff));
+  color: var(--fgColor-default, var(--color-fg-default, #1f2328));
+}
+#shelf-side .shelf-mode:hover {
+  background: var(--bgColor-neutral-muted, var(--color-neutral-muted, #eaeef2));
+}
+
+#shelf-side .shelf-x {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px 6px;
+  line-height: 1;
+  border-radius: 4px;
+  color: var(--fgColor-muted, var(--color-fg-muted, #59636e));
+}
+#shelf-side .shelf-x:hover {
+  background: var(--bgColor-danger-muted, #ffebe9);
+  color: var(--fgColor-danger, #d1242f);
+}
+
+#shelf-side .shelf-new {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+#shelf-side .shelf-new input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--borderColor-default, var(--color-border-default, #d1d9e0));
+  background: var(--bgColor-default, var(--color-canvas-default, #ffffff));
+  color: var(--fgColor-default, var(--color-fg-default, #1f2328));
+}
+#shelf-side .shelf-new button,
+#shelf-side .shelf-actions button {
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 6px;
+  border: 1px solid var(--borderColor-default, var(--color-border-default, #d1d9e0));
+  background: var(--bgColor-default, var(--color-canvas-default, #ffffff));
+  color: var(--fgColor-default, var(--color-fg-default, #1f2328));
+}
+#shelf-side .shelf-new button:hover:not(:disabled),
+#shelf-side .shelf-actions button:hover:not(:disabled) {
+  background: var(--bgColor-neutral-muted, var(--color-neutral-muted, #eaeef2));
+}
+#shelf-side .shelf-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+#shelf-side .shelf-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#shelf-side .shelf-item em i {
+  font-style: normal;
+  margin-right: 4px;
+  opacity: 0.75;
+}
+
+#shelf-side .shelf-flash {
+  margin: 8px 4px 2px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--fgColor-accent, var(--color-accent-fg, #0969da));
+}
+
+#shelf-side code {
+  font-size: 10px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--bgColor-neutral-muted, var(--color-neutral-muted, #eaeef2));
+}
+
+/* The per-row tick that edit mode adds to each repository. */
+label.shelf-tick {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 10px;
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 999px;
+  cursor: pointer;
+  vertical-align: middle;
+  border: 1px solid var(--borderColor-default, var(--color-border-default, #d1d9e0));
+  color: var(--fgColor-muted, var(--color-fg-muted, #59636e));
+  background: var(--bgColor-default, var(--color-canvas-default, #ffffff));
+}
+label.shelf-tick:has(input:checked) {
+  border-color: var(--borderColor-accent-emphasis, var(--color-accent-emphasis, #0969da));
+  color: var(--fgColor-accent, var(--color-accent-fg, #0969da));
+}
+label.shelf-tick:has(input:disabled) {
+  cursor: default;
+  opacity: 0.65;
+}
+label.shelf-tick input {
+  margin: 0;
+}
+
+#shelf-side .shelf-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 8px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--borderColor-default, var(--color-border-default, #d1d9e0));
+  background: var(--bgColor-default, var(--color-canvas-default, #ffffff));
+  color: var(--fgColor-default, var(--color-fg-default, #1f2328));
+}
+
+#shelf-side .shelf-empty,
+#shelf-side .shelf-count {
+  margin: 8px 4px 2px;
+  font-size: 11px;
+  color: var(--fgColor-muted, var(--color-fg-muted, #59636e));
+}
+#shelf-side .shelf-count:empty {
+  display: none;
+  margin: 0;
+}
