@@ -229,3 +229,19 @@ label.shelf-tick input {
   display: none;
   margin: 0;
 }
+
+#shelf-side .shelf-err {
+  margin: 6px 4px 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--fgColor-danger, var(--color-danger-fg, #d1242f));
+}
+
+label.shelf-tick .shelf-auto {
+  font-style: normal;
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--bgColor-neutral-muted, var(--color-neutral-muted, #eaeef2));
+  color: var(--fgColor-muted, var(--color-fg-muted, #59636e));
+}

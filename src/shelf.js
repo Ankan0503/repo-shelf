@@ -1,37 +1,24 @@
-// Shelf — folders on the GitHub repositories tab.
+// Repo Shelf — folders on the GitHub repositories tab.
 //
-// The folder definitions are NOT stored in this extension. They are read from
-// a public file in the profile repo of whichever user you are looking at:
+// Folders are yours and live in this browser (chrome.storage.local), one set
+// per profile you look at. They start empty: nothing is fetched or invented.
+// chrome.storage.local survives page reloads, extension reloads and updates;
+// only uninstalling the extension clears it.
 //
-//   https://raw.githubusercontent.com/<user>/<user>/<branch>/shelf/shelf.config.json
+// A folder's name is a GitHub topic. Any repo carrying exactly that topic is
+// filed automatically, and can be unticked to keep it out without touching the
+// repo. Repos can also be ticked in by hand, and a repo can sit in as many
+// folders as you like.
 //
-// That is the whole point. Anyone who installs this sees the folder structure
-// its owner published, because the structure travels with the profile rather
-// than living in one browser.
-//
-// Edit mode layers a local draft over that published config and hands back the
-// JSON to commit. Nothing is written to GitHub: publishing stays an explicit
-// act, so the extension never needs a token or write access to anything.
-//
-// Repo names and their list elements come from the page, because the rendered
-// list is what we are filtering. Topics do NOT: GitHub shows at most seven
-// topic tags per repo on this page, so a folder tag can be missing from the
-// markup while being set on the repo — measured on a repo carrying eleven
-// topics, where the folder tag was one of the four left out. Topics are
-// therefore read from the API and matched back by name, with the truncated
-// DOM tags kept only as a fallback when the API is unreachable.
+// Topics come from the API, not the page: GitHub shows at most seven topic
+// tags per repo on this tab, so a matching topic can be missing from the
+// markup. The page's tags are only a fallback when the API is unreachable.
 
 (() => {
-  const CONFIG_PATHS = ["shelf/shelf.config.json", "shelf.config.json"];
-  const BRANCHES = ["main", "master"];
   const CACHE_MS = 5 * 60 * 1000;
-
-  // Labels the UI shows. Only LOOSE is a folder name that can reach the
-  // exported config, so it is the one a profile can override, via
-  // `looseLabel` in its config. The other two are chrome and never exported.
-  const LOOSE_KEY = "__loose__";
-  const UI = { all: "All repositories", unsorted: "Unsorted", loose: "Other projects" };
-  const looseLabel = (cfg) => (cfg && cfg.looseLabel) || UI.loose;
+  // GitHub's own topic format: lowercase letters and digits, single hyphens.
+  const NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+  const NAME_MAX = 50;
 
   const SEL = {
     list: ["#user-repositories-list", "turbo-frame#repo-list"],
@@ -63,16 +50,6 @@
 
   // ------------------------------------------------------------------ page ---
 
-  // GitHub puts the signed-in account in a meta tag. Used only to decide
-  // whether to offer the empty editor: on your own profile the panel appears
-  // with nothing published yet, on a stranger's it stays out of the way.
-  function signedInUser() {
-    const m =
-      document.querySelector('meta[name="user-login"]') ||
-      document.querySelector('meta[name="octolytics-actor-login"]');
-    return (m?.content || "").trim() || null;
-  }
-
   function profileOwner() {
     const m = location.pathname.match(/^\/([^/]+)\/?$/);
     if (!m) return null;
@@ -82,7 +59,7 @@
 
   function readRepos() {
     return pickAll(SEL.items)
-      .map((li) => {
+      .map((li, idx) => {
         const a = pick(SEL.link, li);
         if (!a) return null;
         const path = new URL(a.href, location.origin).pathname.replace(/^\//, "");
@@ -91,45 +68,13 @@
         return {
           name,
           lower: name.toLowerCase(),
-          topics: pickAll(SEL.topic, li).map((t) => t.textContent.trim().toLowerCase()),
+          idx,
+          topics: pickAll(SEL.topic, li).map((t) => t.textContent.trim()),
           isPrivate: li.classList.contains("private") || /\bPrivate\b/.test(text),
-          isFork: /Forked from/i.test(text),
           el: li
         };
       })
       .filter(Boolean);
-  }
-
-  // ----------------------------------------------------------------- data ---
-
-  async function loadConfig(owner) {
-    const key = `shelf:cfg:${owner}`;
-    try {
-      const hit = JSON.parse(sessionStorage.getItem(key) || "null");
-      if (hit && Date.now() - hit.at < CACHE_MS) return hit.cfg;
-    } catch {
-      /* sessionStorage can throw in private windows; fall through and fetch */
-    }
-    for (const branch of BRANCHES) {
-      for (const path of CONFIG_PATHS) {
-        const url = `https://raw.githubusercontent.com/${owner}/${owner}/${branch}/${path}`;
-        try {
-          const res = await fetch(url, { cache: "no-cache" });
-          if (!res.ok) continue;
-          const cfg = await res.json();
-          if (!cfg || !Array.isArray(cfg.folders)) continue;
-          try {
-            sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), cfg }));
-          } catch {
-            /* not worth failing over */
-          }
-          return cfg;
-        } catch {
-          /* try the next candidate */
-        }
-      }
-    }
-    return null;
   }
 
   // Authoritative topics, because the page's tags are capped at seven per repo.
@@ -144,25 +89,20 @@
     const map = {};
     try {
       for (let page = 1; page <= 4; page++) {
-        // `type=owner` deliberately, not `type=all`: `all` also returns repos
-        // the user only collaborates on, which can share a name with one they
-        // own — a fork and its upstream both appear as "HackHeritage" — and the
-        // second entry would overwrite the first, silently losing the folder
-        // topic. The repositories tab lists what they own, so that is what we
-        // mirror, and the owner check keeps it true even if that changes.
+        // `type=owner`, not `type=all`: `all` adds repos the user only
+        // collaborates on, and a fork shares its upstream's name, so the
+        // second entry would overwrite the first and lose its topics.
         const res = await fetch(
           `https://api.github.com/users/${encodeURIComponent(owner)}/repos` +
             `?per_page=100&page=${page}&type=owner`,
           { headers: { Accept: "application/vnd.github+json" }, cache: "no-cache" }
         );
-        if (!res.ok) return null; // rate limited or offline — caller falls back
+        if (!res.ok) return null;
         const batch = await res.json();
         if (!Array.isArray(batch)) return null;
         for (const r of batch) {
           if (String(r.owner?.login || "").toLowerCase() !== owner.toLowerCase()) continue;
-          map[String(r.name).toLowerCase()] = (r.topics || []).map((t) =>
-            String(t).toLowerCase()
-          );
+          map[String(r.name).toLowerCase()] = (r.topics || []).map(String);
         }
         if (batch.length < 100) break;
       }
@@ -177,119 +117,88 @@
     return map;
   }
 
-  // ---------------------------------------------------------------- draft ---
-  // A draft is this browser's unpublished edits for one profile: folders you
-  // made and repos you ticked. It is keyed by profile so looking at someone
-  // else's page cannot disturb your own.
+  // -------------------------------------------------------------- storage ---
 
-  const draftKey = (owner) => `shelf:draft:${owner.toLowerCase()}`;
-  const emptyDraft = () => ({ folders: [], picks: {}, removed: [], drops: {}, excludes: {} });
+  const storeKey = (owner) => `shelf:folders:${owner.toLowerCase()}`;
 
-  async function loadDraft(owner) {
+  const clean = (f) =>
+    f && typeof f.name === "string"
+      ? {
+          name: f.name,
+          add: Array.isArray(f.add) ? f.add.map(String) : [],
+          exclude: Array.isArray(f.exclude) ? f.exclude.map(String) : []
+        }
+      : null;
+
+  async function loadFolders(owner) {
     try {
-      const got = await chrome.storage.local.get(draftKey(owner));
-      const d = got[draftKey(owner)];
-      return d && typeof d === "object" ? { ...emptyDraft(), ...d } : emptyDraft();
+      // Drafts from earlier versions are dropped so nothing old resurfaces.
+      chrome.storage.local.remove(`shelf:draft:${owner.toLowerCase()}`).catch(() => {});
+      const got = await chrome.storage.local.get(storeKey(owner));
+      const v = got[storeKey(owner)];
+      return Array.isArray(v) ? v.map(clean).filter(Boolean) : [];
     } catch {
-      return emptyDraft();
+      return [];
     }
   }
 
-  async function saveDraft(owner, draft) {
+  async function saveFolders() {
     try {
-      await chrome.storage.local.set({ [draftKey(owner)]: draft });
+      await chrome.storage.local.set({ [storeKey(state.owner)]: state.folders });
     } catch {
-      /* storage can be unavailable; the session still works in memory */
+      state.flash = "Couldn't save to extension storage. Your change will be lost on reload.";
     }
   }
 
-  // Published folders plus drafted ones, with ticked repos appended to each
-  // folder's explicit `repos` list. This is exactly what gets exported.
-  function mergeConfig(cfg, draft) {
-    const out = {
-      owner: cfg?.owner,
-      folders: (cfg?.folders || []).map((f) => ({ ...f, repos: [...(f.repos || [])] })),
-      loose: [...(cfg?.loose || [])]
+  // ------------------------------------------------------------- folders ---
+
+  function validateName(raw) {
+    const name = raw.trim();
+    if (!name) return { error: "" };
+    if (name.length > NAME_MAX)
+      return { error: `Keep it to ${NAME_MAX} characters — the same limit GitHub puts on topics.` };
+    if (!NAME_RE.test(name)) {
+      const suggestion = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+      return {
+        error:
+          "Use lowercase letters and numbers joined by single hyphens" +
+          (suggestion && NAME_RE.test(suggestion) ? ` — try "${suggestion}"` : "") +
+          ". The name is matched exactly against repo topics, which GitHub keeps lowercase."
+      };
+    }
+    if (state.folders.some((f) => f.name === name)) return { error: `"${name}" already exists.` };
+    return { name };
+  }
+
+  const byTopic = (f, r) => r.topics.includes(f.name);
+  const listed = (list, r) => list.some((n) => n.toLowerCase() === r.lower);
+  const isMember = (f, r) => !listed(f.exclude, r) && (byTopic(f, r) || listed(f.add, r));
+
+  const members = (i) => state.repos.filter((r) => isMember(state.folders[i], r));
+  const unsorted = () => state.repos.filter((r) => !state.folders.some((f) => isMember(f, r)));
+  const isFolderId = (id) => /^\d+$/.test(id);
+
+  function listFor(id) {
+    if (id === "all") return state.repos;
+    if (id === "unsorted") return unsorted();
+    return members(Number(id));
+  }
+
+  function editingFolder() {
+    return state.editing && isFolderId(state.active) ? state.folders[Number(state.active)] : null;
+  }
+
+  function exportConfig() {
+    // Same shape generate_projects.py reads: the folder's name doubles as its tag.
+    return {
+      owner: state.owner,
+      folders: state.folders.map((f) => {
+        const o = { name: f.name, tags: [f.name] };
+        if (f.add.length) o.repos = [...f.add];
+        if (f.exclude.length) o.exclude = [...f.exclude];
+        return o;
+      })
     };
-    for (const f of draft.folders || []) {
-      if (!out.folders.some((x) => x.name === f.name)) out.folders.push({ name: f.name, repos: [] });
-    }
-    // A deleted folder is dropped from the exported config. Repos it held by
-    // topic keep their topics — removing those is a change to the repo itself.
-    const gone = new Set((draft.removed || []).map((n) => n.toLowerCase()));
-    out.folders = out.folders.filter((f) => !gone.has(String(f.name).toLowerCase()));
-    for (const [key, names] of Object.entries(draft.picks || {})) {
-      if (key === LOOSE_KEY) {
-        for (const n of names) if (!out.loose.some((r) => r.toLowerCase() === n.toLowerCase())) out.loose.push(n);
-        continue;
-      }
-      const target = out.folders.find((f) => f.name === key);
-      if (!target) continue;
-      for (const n of names) {
-        if (!target.repos.some((r) => r.toLowerCase() === n.toLowerCase())) target.repos.push(n);
-      }
-    }
-    // Unticking a repo that the published config lists by name removes it here.
-    // The loose folder is not a real folder — it is rendered from `loose` — so a
-    // drop there comes out of that list. It is keyed by LOOSE_KEY rather than by
-    // its label, so renaming the label cannot orphan a draft.
-    for (const [key, names] of Object.entries(draft.drops || {})) {
-      const lower = names.map((n) => n.toLowerCase());
-      if (key === LOOSE_KEY) {
-        out.loose = out.loose.filter((r) => !lower.includes(r.toLowerCase()));
-        continue;
-      }
-      const target = out.folders.find((f) => f.name === key);
-      if (target) target.repos = (target.repos || []).filter((r) => !lower.includes(r.toLowerCase()));
-    }
-    for (const [key, names] of Object.entries(draft.excludes || {})) {
-      const target = out.folders.find((f) => f.name === key);
-      if (!target) continue;
-      const have = (target.exclude || []).map((r) => r.toLowerCase());
-      target.exclude = [
-        ...(target.exclude || []),
-        ...names.filter((n) => !have.includes(n.toLowerCase()))
-      ];
-    }
-    out.folders.forEach((f) => {
-      if (!f.repos.length) delete f.repos;
-      if (f.exclude && !f.exclude.length) delete f.exclude;
-    });
-    if (!out.loose.length) delete out.loose;
-    if (!out.owner) delete out.owner;
-    return out;
-  }
-
-  // Folders in config order; a repo is claimed by the first folder that matches,
-  // so a repo carrying two folder topics appears once rather than twice.
-  function assign(cfg, repos) {
-    const claimed = new Set();
-    const folders = [];
-    for (const f of cfg.folders || []) {
-      const tags = (f.tags || []).map((t) => String(t).toLowerCase());
-      const named = (f.repos || []).map((r) => String(r).toLowerCase());
-      const excluded = (f.exclude || []).map((r) => String(r).toLowerCase());
-      const members = repos.filter((r) => {
-        if (claimed.has(r.lower) || excluded.includes(r.lower)) return false;
-        return named.includes(r.lower) || r.topics.some((t) => tags.includes(t));
-      });
-      members.forEach((r) => claimed.add(r.lower));
-      folders.push({
-        key: f.name,
-        name: f.name,
-        blurb: f.blurb,
-        tags,
-        named,
-        excluded,
-        repos: members
-      });
-    }
-    const loose = (cfg.loose || []).map((r) => String(r).toLowerCase());
-    const other = repos.filter((r) => !claimed.has(r.lower) && loose.includes(r.lower));
-    other.forEach((r) => claimed.add(r.lower));
-    if (other.length)
-      folders.push({ key: LOOSE_KEY, name: looseLabel(cfg), repos: other, tags: [], named: loose });
-    return { folders, rest: repos.filter((r) => !claimed.has(r.lower)) };
   }
 
   // ------------------------------------------------------------------- ui ---
@@ -297,131 +206,84 @@
   let state = {
     owner: null,
     repos: [],
-    cfg: null,
-    draft: emptyDraft(),
     folders: [],
-    rest: [],
     active: "all",
     editing: false,
+    search: "",
+    newName: "",
     degraded: false,
-    flash: ""
+    flash: "",
+    error: ""
   };
 
-  function recompute() {
-    const merged = mergeConfig(state.cfg, state.draft);
-    const { folders, rest } = assign(merged, state.repos);
-    state.folders = folders;
-    state.rest = rest;
-    state.merged = merged;
-  }
-
-  function visible(id) {
-    if (id === "all") return state.repos;
-    if (id === "unsorted") return state.rest;
-    return state.folders[Number(id)]?.repos || [];
-  }
-
-  // Which repos are on screen. Browsing a folder shows its members; editing one
-  // shows everything, because the ticks live on the rows and a new folder has no
-  // members — filtering to them would hide every row you need to tick.
-  function onScreen() {
-    return editingFolder() ? state.repos : visible(state.active);
-  }
-
-  function editingFolder() {
-    return state.editing && state.active !== "all" && state.active !== "unsorted"
-      ? state.folders[Number(state.active)]
-      : null;
-  }
-
-  function applyFilter() {
-    const keep = new Set(onScreen().map((r) => r.lower));
-    const q = (state.search || "").trim().toLowerCase();
+  // While a folder is being edited every repo is listed, because the ticks
+  // live on the rows and a new folder has no members to show. Browsing shows
+  // only the folder's members.
+  function applyFilter(rearrange) {
+    const f = editingFolder();
+    const keep = new Set((f ? state.repos : listFor(state.active)).map((r) => r.lower));
+    const q = state.search.trim().toLowerCase();
     state.repos.forEach((r) => {
       const show = keep.has(r.lower) && (!q || r.lower.includes(q));
-      // setProperty with "important", not style.display: GitHub's rows carry
-      // Primer's `d-flex` utility, which is `display:flex !important`, and a
-      // plain inline display loses to it — the row stays visible and the
-      // folder looks like it did nothing.
+      // An important inline rule: the rows carry Primer's d-flex, which is
+      // `display:flex !important`, and a plain inline display loses to it.
       if (show) r.el.style.removeProperty("display");
       else r.el.style.setProperty("display", "none", "important");
     });
+    if (rearrange) arrange(f);
     renderRowControls();
   }
 
-  function shown() {
-    const keep = new Set(onScreen().map((r) => r.lower));
-    const q = (state.search || "").trim().toLowerCase();
-    return state.repos.filter((r) => keep.has(r.lower) && (!q || r.lower.includes(q)));
+  // Members of the folder being edited go to the top so they are quick to
+  // untick. Done when a folder is opened rather than on every tick, so a row
+  // never jumps away from under the pointer. Original order otherwise.
+  function arrange(f) {
+    const ul = state.repos[0]?.el.parentElement;
+    if (!ul) return;
+    const ordered = [...state.repos].sort((a, b) => a.idx - b.idx);
+    const list = f
+      ? [...ordered.filter((r) => isMember(f, r)), ...ordered.filter((r) => !isMember(f, r))]
+      : ordered;
+    list.forEach((r) => ul.appendChild(r.el));
   }
 
-  // In edit mode every row gets a tick for the folder being edited, ticked when
-  // that folder already holds the repo. The whole list is shown while editing,
-  // not just the folder's members, because a folder you just made has none.
   function renderRowControls() {
-    const folderBeingEdited = editingFolder();
-
+    const f = editingFolder();
     state.repos.forEach((r) => {
       r.el.querySelector(".shelf-tick")?.remove();
-      if (!folderBeingEdited) return;
-      const fld = folderBeingEdited;
+      if (!f) return;
 
-      const folder = fld.key;
-      const byTopic = r.topics.some((t) => (fld.tags || []).includes(t));
-      const picked = (state.draft.picks[folder] || []).some((n) => n.toLowerCase() === r.lower);
-      const dropped = (state.draft.drops[folder] || []).some((n) => n.toLowerCase() === r.lower);
-      const inConfig = (fld.named || []).includes(r.lower);
-
-      // Nothing is locked. Unticking a repo that a topic put here records an
-      // exclusion rather than editing the repo's topics, which would need write
-      // access this extension does not have. The topic stays on the repo; the
-      // folder simply stops claiming it.
-      const excluded = (fld.excluded || []).includes(r.lower);
-      const checked = !excluded && !dropped && (byTopic || picked || inConfig);
-
+      const auto = byTopic(f, r);
+      const checked = isMember(f, r);
       const label = document.createElement("label");
       label.className = "shelf-tick";
       label.title = checked
-        ? byTopic
-          ? `Remove ${r.name} from ${fld.name} — the repo keeps its topic`
-          : `Remove ${r.name} from ${fld.name}`
-        : `Add ${r.name} to ${fld.name}`;
-      label.innerHTML = `<input type="checkbox" ${checked ? "checked" : ""}><span>${esc(fld.name)}</span>`;
+        ? auto
+          ? `In ${f.name} because the repo has the "${f.name}" topic — untick to keep it out`
+          : `Remove from ${f.name}`
+        : auto
+        ? `Put back into ${f.name}`
+        : `Add to ${f.name}`;
+      label.innerHTML =
+        `<input type="checkbox"${checked ? " checked" : ""}><span>${esc(f.name)}</span>` +
+        (auto ? `<em class="shelf-auto">topic</em>` : "");
 
       label.querySelector("input").addEventListener("change", async (e) => {
-        const picks = state.draft.picks[folder] || [];
-        const drops = state.draft.drops[folder] || [];
-        const excl = state.draft.excludes[folder] || [];
+        const without = (list) => list.filter((n) => n.toLowerCase() !== r.lower);
+        f.add = without(f.add);
+        f.exclude = without(f.exclude);
         if (e.target.checked) {
-          state.draft.drops[folder] = drops.filter((n) => n.toLowerCase() !== r.lower);
-          state.draft.excludes[folder] = excl.filter((n) => n.toLowerCase() !== r.lower);
-          if (!inConfig && !byTopic) state.draft.picks[folder] = [...picks, r.name];
-        } else {
-          state.draft.picks[folder] = picks.filter((n) => n.toLowerCase() !== r.lower);
-          if (byTopic) state.draft.excludes[folder] = [...excl, r.name];
-          else if (inConfig) state.draft.drops[folder] = [...drops, r.name];
+          if (!auto) f.add.push(r.name);
+        } else if (auto) {
+          f.exclude.push(r.name);
         }
-        for (const k of ["picks", "drops", "excludes"]) {
-          if (!(state.draft[k][folder] || []).length) delete state.draft[k][folder];
-        }
-        await saveDraft(state.owner, state.draft);
-        recompute();
+        await saveFolders();
         render();
-        applyFilter();
+        applyFilter(false);
       });
 
       (r.el.querySelector("h3")?.parentElement || r.el).appendChild(label);
     });
-  }
-
-  function draftCount() {
-    return (
-      (state.draft.folders || []).length +
-      (state.draft.removed || []).length +
-      Object.values(state.draft.picks || {}).reduce((n, v) => n + v.length, 0) +
-      Object.values(state.draft.drops || {}).reduce((n, v) => n + v.length, 0) +
-      Object.values(state.draft.excludes || {}).reduce((n, v) => n + v.length, 0)
-    );
   }
 
   function render() {
@@ -434,26 +296,23 @@
       anchor.parentElement.insertBefore(side, anchor);
     }
 
-    const counts = (list) => {
+    const lock = (list) => {
       const p = list.filter((r) => r.isPrivate).length;
-      return p ? `<i title="${p} private — these stay invisible to anyone else">${p}🔒</i>` : "";
+      return p ? `<i title="${p} private — invisible to anyone else">${p}🔒</i>` : "";
     };
-
-    const row = (id, label, list, blurb) => `
+    const row = (id, label, list, deletable) => `
       <li>
-        <button class="shelf-item${state.active === id ? " is-active" : ""}" data-id="${id}"
-                ${blurb ? `title="${esc(blurb)}"` : ""}>
-          <span>${esc(label)}</span>
-          <em>${counts(list)}${list.length}</em>
+        <button class="shelf-item${state.active === id ? " is-active" : ""}" data-id="${id}">
+          <span>${esc(label)}</span><em>${lock(list)}${list.length}</em>
         </button>
         ${
-          state.editing && id !== "all" && id !== "unsorted"
-            ? `<button class="shelf-x" data-del="${esc(label)}" title="Remove this folder from the config">×</button>`
+          deletable && state.editing
+            ? `<button class="shelf-x" data-del="${id}" title="Delete this folder">×</button>`
             : ""
         }
       </li>`;
 
-    const n = draftCount();
+    const f = editingFolder();
 
     side.innerHTML = `
       <div class="shelf-head">
@@ -461,136 +320,116 @@
         <button class="shelf-mode" data-mode>${state.editing ? "done" : "edit"}</button>
       </div>
       <input class="shelf-search" type="search" placeholder="Search repositories…"
-             value="${esc(state.search || "")}" aria-label="Search repositories">
+             value="${esc(state.search)}" aria-label="Search repositories">
       <ul class="shelf-list">
-        ${row("all", UI.all, state.repos)}
-        ${state.folders.map((f, i) => row(String(i), f.name, f.repos, f.blurb)).join("")}
-        ${state.rest.length ? row("unsorted", UI.unsorted, state.rest) : ""}
+        ${row("all", "All repositories", state.repos, false)}
+        ${state.folders.map((fo, i) => row(String(i), fo.name, members(i), true)).join("")}
+        ${row("unsorted", "Unsorted", unsorted(), false)}
       </ul>
       ${
-        state.editing
-          ? `<form class="shelf-new"><input placeholder="New folder…" maxlength="40"><button>Add</button></form>
-             <div class="shelf-actions">
-               <button data-copy ${n ? "" : "disabled"}>Copy config${n ? ` (${n})` : ""}</button>
-               <button data-reset ${n ? "" : "disabled"}>Discard</button>
-             </div>
-             <p class="shelf-note">${
-               editingFolder()
-                 ? `Showing every repository — tick one to put it in <b>${esc(
-                     editingFolder().name
-                   )}</b>.${
-                     n
-                       ? " Copy the config into <code>shelf/shelf.config.json</code> in your profile repo to publish."
-                       : ""
-                   }`
-                 : "Pick a folder above, then tick repositories in the list."
-             }</p>`
-          : `<p class="shelf-note">${
-              state.degraded
-                ? "GitHub's API did not answer, so folders use the tags shown on this page — which GitHub caps at seven per repo and may be incomplete."
-                : "Counts cover the repositories on this page."
+        state.folders.length
+          ? ""
+          : `<p class="shelf-empty">No folders yet.${
+              state.editing ? "" : " Click <b>edit</b> to make one."
             }</p>`
       }
       ${
-        !state.folders.length && !state.editing
-          ? `<p class="shelf-empty">No folders yet. Click <b>edit</b> to make one.</p>`
+        state.editing
+          ? `<form class="shelf-new">
+               <input placeholder="folder-name" maxlength="${NAME_MAX}" value="${esc(state.newName)}"
+                      spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="New folder name">
+               <button>Add</button>
+             </form>
+             ${state.error ? `<p class="shelf-err">${esc(state.error)}</p>` : ""}
+             <p class="shelf-note">${
+               f
+                 ? `Every repository is listed, those in <b>${esc(f.name)}</b> first. ` +
+                   `Repos tagged <code>${esc(f.name)}</code> join on their own — untick to keep one out.`
+                 : "Names match repo topics exactly, so use lowercase and hyphens, " +
+                   "like <code>sih-2026</code>. Pick a folder to tick repos into it."
+             }</p>
+             ${
+               state.folders.length
+                 ? `<div class="shelf-actions"><button data-copy>Copy config</button></div>`
+                 : ""
+             }`
+          : state.degraded
+          ? `<p class="shelf-note">GitHub's API didn't answer, so topic matching uses the tags on this page, which GitHub caps at seven per repo.</p>`
           : ""
       }
-      <p class="shelf-count"></p>
       ${state.flash ? `<p class="shelf-flash">${esc(state.flash)}</p>` : ""}`;
 
     side.querySelectorAll(".shelf-item").forEach((b) =>
       b.addEventListener("click", () => {
         state.active = b.dataset.id;
+        state.flash = "";
         render();
-        applyFilter();
+        applyFilter(true);
       })
     );
 
-    const search = side.querySelector(".shelf-search");
-    if (search) {
-      search.addEventListener("input", (e) => {
-        state.search = e.target.value;
-        applyFilter();
-        const n = shown().length;
-        const note = side.querySelector(".shelf-count");
-        if (note) note.textContent = state.search ? `${n} matching` : "";
-      });
-      if (state.refocusSearch) {
-        search.focus();
-        search.setSelectionRange(search.value.length, search.value.length);
-        state.refocusSearch = false;
-      }
-    }
-
-    side.querySelector("[data-mode]")?.addEventListener("click", () => {
+    side.querySelector("[data-mode]").addEventListener("click", () => {
       state.editing = !state.editing;
+      state.error = "";
+      state.flash = "";
       render();
-      applyFilter();
+      applyFilter(true);
+    });
+
+    side.querySelector(".shelf-search").addEventListener("input", (e) => {
+      state.search = e.target.value;
+      applyFilter(false);
     });
 
     side.querySelectorAll(".shelf-x").forEach((b) =>
       b.addEventListener("click", async () => {
-        const name = b.dataset.del;
-        const wasDrafted = (state.draft.folders || []).some((f) => f.name === name);
-        state.draft.folders = (state.draft.folders || []).filter((f) => f.name !== name);
-        delete state.draft.picks[name];
-        if (!wasDrafted) {
-          state.draft.removed = [...new Set([...(state.draft.removed || []), name])];
-          state.flash = `"${name}" removed. Copy the config and commit it to publish that.`;
-        }
-        await saveDraft(state.owner, state.draft);
+        const i = Number(b.dataset.del);
+        const name = state.folders[i]?.name;
+        if (!name || !confirm(`Delete the folder "${name}"? Repos keep their topics.`)) return;
+        state.folders.splice(i, 1);
         state.active = "all";
-        recompute();
+        await saveFolders();
         render();
-        applyFilter();
+        applyFilter(true);
       })
     );
 
-    side.querySelector(".shelf-new")?.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const input = e.target.querySelector("input");
-      const name = input.value.trim();
-      if (!name) return;
-      if (
-        state.folders.some((f) => f.name === name) ||
-        (state.draft.folders || []).some((f) => f.name === name)
-      ) {
-        state.flash = "A folder with that name already exists.";
+    const form = side.querySelector(".shelf-new");
+    if (form) {
+      const input = form.querySelector("input");
+      input.addEventListener("input", () => {
+        state.newName = input.value;
+      });
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const v = validateName(input.value);
+        if (!v.name) {
+          state.error = v.error;
+          state.newName = input.value;
+          render();
+          side.querySelector(".shelf-new input")?.focus();
+          return;
+        }
+        state.folders.push({ name: v.name, add: [], exclude: [] });
+        state.active = String(state.folders.length - 1);
+        state.error = "";
+        state.newName = "";
+        await saveFolders();
         render();
-        return;
-      }
-      state.draft.folders = [...(state.draft.folders || []), { name }];
-      await saveDraft(state.owner, state.draft);
-      state.flash = "";
-      recompute();
-      render();
-      applyFilter();
-    });
+        applyFilter(true);
+      });
+    }
 
     side.querySelector("[data-copy]")?.addEventListener("click", async () => {
-      const json = JSON.stringify(state.merged, null, 2) + "\n";
+      const json = JSON.stringify(exportConfig(), null, 2) + "\n";
       try {
         await navigator.clipboard.writeText(json);
-        const priv = state.repos.filter((r) => r.isPrivate).length;
-        state.flash =
-          "Config copied. Commit it to shelf/shelf.config.json." +
-          (priv ? ` ${priv} private repo${priv > 1 ? "s" : ""} will not render for anyone else.` : "");
+        state.flash = "Copied as shelf.config.json.";
       } catch {
-        state.flash = "Clipboard blocked — open the console and copy from there.";
         console.log(json);
+        state.flash = "Clipboard blocked — the config is in the console.";
       }
       render();
-    });
-
-    side.querySelector("[data-reset]")?.addEventListener("click", async () => {
-      state.draft = emptyDraft();
-      await saveDraft(state.owner, state.draft);
-      state.flash = "Draft discarded.";
-      state.active = "all";
-      recompute();
-      render();
-      applyFilter();
     });
   }
 
@@ -610,69 +449,60 @@
       const repos = readRepos();
       if (!repos.length) return;
 
-      const [cfg, topicMap, draft] = await Promise.all([
-        loadConfig(owner),
-        loadTopics(owner),
-        loadDraft(owner)
-      ]);
-
-      // Nothing published and nothing drafted. On your own profile the empty
-      // editor is the starting point, so show it; on someone else's there is
-      // nothing to offer, so leave their page exactly as GitHub rendered it.
-      const hasDraft = (draft.folders || []).length > 0;
-      const me = signedInUser();
-      const ownProfile = !!me && me.toLowerCase() === owner.toLowerCase();
-      if (!cfg && !hasDraft && !ownProfile) {
-        document.getElementById("shelf-side")?.remove();
-        return;
-      }
-
+      const [topicMap, folders] = await Promise.all([loadTopics(owner), loadFolders(owner)]);
       if (topicMap) {
         repos.forEach((r) => {
           if (topicMap[r.lower]) r.topics = topicMap[r.lower];
         });
       }
 
-      const sameOwner = state.owner === owner;
+      const same = state.owner === owner;
       state = {
         ...state,
         owner,
         repos,
-        cfg: cfg || { folders: [] },
-        draft,
+        folders,
         degraded: !topicMap,
-        editing: sameOwner ? state.editing : false,
-        active: sameOwner ? state.active : "all",
-        flash: ""
+        editing: same ? state.editing : false,
+        active: same ? state.active : "all",
+        search: same ? state.search : "",
+        flash: "",
+        error: ""
       };
-      recompute();
-      if (state.active !== "all" && !visible(state.active).length) state.active = "all";
+      if (isFolderId(state.active) && !state.folders[Number(state.active)]) state.active = "all";
 
       render();
-      applyFilter();
+      applyFilter(true);
     } finally {
       booting = false;
     }
   }
 
-  // Starting a first config on a profile with none: the panel only appears once
-  // something is drafted, so this opens it from the console.
-  window.shelfStart = async () => {
-    const owner = profileOwner();
-    if (!owner) return "Open a repositories tab first.";
-    const draft = await loadDraft(owner);
-    draft.folders = [...(draft.folders || []), { name: `Folder ${(draft.folders || []).length + 1}` }];
-    await saveDraft(owner, draft);
-    await boot();
-    return `Drafted a folder on ${owner}. Use edit mode in the panel.`;
-  };
+  // Keep every open tab in step when folders change in one of them.
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local" || !state.owner) return;
+      const c = changes[storeKey(state.owner)];
+      if (!c) return;
+      const next = (Array.isArray(c.newValue) ? c.newValue : []).map(clean).filter(Boolean);
+      if (JSON.stringify(next) === JSON.stringify(state.folders)) return;
+      state.folders = next;
+      if (isFolderId(state.active) && !state.folders[Number(state.active)]) state.active = "all";
+      render();
+      applyFilter(true);
+    });
+  } catch {
+    /* storage events unavailable; each tab still works on its own */
+  }
 
-  // GitHub navigates with Turbo and swaps the list in place when you search or
-  // paginate, so re-run on soft navigation and whenever the panel goes missing.
+  // GitHub navigates with Turbo and can swap the list in place, so re-run on
+  // soft navigation, when the panel disappears, or when the rows go stale.
   document.addEventListener("turbo:load", boot);
   window.addEventListener("popstate", boot);
   new MutationObserver(() => {
-    if (profileOwner() && !document.getElementById("shelf-side")) boot();
+    if (!profileOwner()) return;
+    const stale = state.repos.length && !state.repos[0].el.isConnected;
+    if (!document.getElementById("shelf-side") || stale) boot();
   }).observe(document.body, { childList: true, subtree: true });
 
   boot();

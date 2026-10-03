@@ -1,141 +1,85 @@
 # Repo Shelf
 
-**Folders on the GitHub repositories tab — read from the profile you're looking at.**
+**Your own folders on the GitHub repositories tab.**
 
-GitHub has no folders for repositories. Extensions that add them keep the
-structure in your own browser, so they organise *your* view of everyone's
-profile and nobody else ever sees yours.
+GitHub has no folders for repositories. Repo Shelf adds a folder panel above
+the list on any `github.com/<user>?tab=repositories` page. You make the
+folders; nothing comes preinstalled.
 
-Shelf works the other way round. The folders are **published by the profile
-owner** in a public file in their profile repo, so anyone who installs this
-sees the structure that person intended — for their own profile and for
-everybody else's.
+## How it works
 
-```
-github.com/<user>?tab=repositories
-        │
-        ├── reads  raw.githubusercontent.com/<user>/<user>/main/shelf/shelf.config.json
-        ├── reads  api.github.com/users/<user>/repos        (for topics)
-        └── renders a folder sidebar and filters the list
-```
-
-No server, no account, no sign-in, nothing stored about you.
+- **A folder's name is a topic.** Name a folder `sih-2026` and every repo with
+  the `sih-2026` topic files itself into it. Matching is exact.
+- **Tick anything in, untick anything out.** Ticking adds a repo by hand.
+  Unticking a repo that a topic brought in keeps it out of the folder without
+  touching the repo — its topic stays.
+- **A repo can be in as many folders as you like.**
+- **While you edit a folder, every repository is listed**, with the folder's
+  members first so they're quick to untick.
 
 ## Install
 
 1. Clone or download this folder.
-2. Open `chrome://extensions`, enable **Developer mode**.
-3. **Load unpacked**, select this folder.
-4. Visit any `github.com/<user>?tab=repositories`.
+2. Open `chrome://extensions`, turn on **Developer mode**.
+3. **Load unpacked**, select this folder — the one with `manifest.json` in it.
+4. Open `github.com/<you>?tab=repositories`.
 
-If that user hasn't published a config, the page is left exactly as GitHub
-rendered it. Nothing is injected and nothing breaks.
+## Using it
 
-## Making your own folders
+1. Click **edit**.
+2. Type a folder name and **Add**. The new folder opens straight away.
+3. Tick repositories into it. Repos already carrying that topic are ticked for
+   you, marked **topic**.
+4. Click **done**. Clicking a folder now shows just its repositories.
 
-Click **edit** in the panel.
+**×** next to a folder deletes it. **Search** narrows whatever is listed.
 
-- **Add a folder** with the name box, **×** removes one.
-- **Search** narrows the list inside whichever folder is selected.
-- **Pick a folder** in the list. The page then shows *every* repository, each with a tick for that folder — tick to add, untick to remove.
-- **Copy config** puts the whole thing on your clipboard as JSON.
-- Paste it into `shelf/shelf.config.json` in your profile repo and commit.
+### Folder names
 
-Your edits live in this browser until you publish them, so nothing is written
-to GitHub and the extension never needs write access or a token.
+Lowercase letters and numbers joined by single hyphens, up to 50 characters:
+`sih-2026`, `hhgoa`, `hf2026`. That is GitHub's own topic format, and it's
+required because a folder matches topics exactly — a folder called `SIH 2026`
+could never match anything. The panel suggests a valid form when a name is
+rejected.
 
-Unticking works on everything, including repos a **topic** put in the folder.
-That records an exclusion in the config rather than editing the repo — the
-topic stays where it is, the folder just stops claiming that repo. To drop the
-topic itself instead, use `gh repo edit <repo> --remove-topic <tag>`.
+## Where your folders live
 
-Private repositories and forks can be ticked like any other. A private repo
-will render for **you** and for nobody else — they cannot see the repository at
-all — so the copy-config message tells you how many are in the config and will
-be invisible to visitors.
+In this browser, in the extension's own storage, one set per profile. They
+survive page reloads, extension reloads and updates. Only uninstalling the
+extension clears them — or loading it from a different folder, since Chrome
+derives an unpacked extension's identity from its path.
 
-On **your own** profile the panel appears even with nothing published yet, so
-a fresh install has somewhere to start. On someone else's profile with no
-config it stays hidden — there is nothing to show.
+Nothing is sent anywhere. The one network call is to GitHub's public API, to
+read each repo's topics.
 
-There are no folders out of the box. Shelf does not invent a structure for
-you; every folder is one you made or one the profile owner published.
+### Copy config
 
-## Publishing your folders
+**Copy config** puts your folders on the clipboard as JSON, in the
+`shelf.config.json` shape: each folder's name as its tag, plus any repos you
+ticked in (`repos`) or out (`exclude`). Use it to back your folders up, or to
+feed a profile README generator.
 
-Add `shelf/shelf.config.json` to your profile repo — the one named after your
-account, the same repo whose README shows on your profile:
+## Two things the page can't be trusted for
 
-```json
-{
-  "owner": "your-username",
-  "folders": [
-    {
-      "name": "SIH 2026",
-      "blurb": "Smart India Hackathon.",
-      "tags": ["sih"]
-    },
-    {
-      "name": "Hacktoberfest 2026",
-      "tags": ["hf2026"]
-    }
-  ],
-  "loose": ["some-repo-with-no-topic"]
-}
-```
+Both were found by testing against a real profile, and both made the panel look
+right while doing the wrong thing.
 
-| Key | Meaning |
-| --- | --- |
-| `folders[].name` | Folder label |
-| `folders[].blurb` | Tooltip text, optional |
-| `folders[].tags` | Repo **topics** that file a repo into this folder |
-| `folders[].repos` | Repo names, for anything you'd rather not tag |
-| `folders[].exclude` | Repo names this folder ignores even if a tag matches |
-| `loose` | Repos shown in the catch-all folder with no folder of their own |
-| `looseLabel` | Renames that catch-all folder. Defaults to "Other projects" |
+**GitHub shows at most seven topic tags per repo on this tab.** A repo with more
+can have the matching topic missing from the page entirely, so topics are read
+from the API. If the API doesn't answer — 60 anonymous requests an hour, cached
+for five minutes per profile — the panel falls back to the page's tags and says
+so.
 
-Adding a repo to a folder is then one command — no config edit:
-
-```bash
-gh repo edit <user>/<repo> --add-topic hf2026
-```
-
-Folders are matched in order and a repo is claimed by the first one that fits,
-so a repo carrying two folder topics appears once rather than twice.
-
-## Two things that are easy to get wrong
-
-Both of these were found by testing against a real profile, and both would have
-produced a sidebar that looked fine while quietly filing repos into the wrong
-folder.
-
-**GitHub renders at most seven topic tags per repo on the repositories tab.**
-Scraping topics out of the page therefore misses them on any repo with more
-than seven — on the profile this was built against, a repo with eleven topics
-had its folder tag among the four GitHub left out. Shelf reads repo names and
-their list elements from the page, but takes topics from the API.
-
-**`type=all` returns duplicate names.** The user-repos endpoint with
-`type=all` also returns repos the user merely collaborates on, and a fork and
-its upstream share a name. The second entry overwrites the first in a
-name-keyed map, losing the topics of the one you wanted. Shelf asks for
-`type=owner` and additionally checks `owner.login`, which is what the
-repositories tab shows anyway.
+**The repo rows are `display:flex !important`** through Primer's `d-flex`
+class, so hiding a row with a plain inline `display:none` silently does nothing.
+Rows are hidden with an important inline rule instead.
 
 ## Limits
 
-- **The viewer has to install it.** Someone without the extension sees GitHub's
-  ordinary flat list. This is a nicer view for people who opt in, not a way to
-  restructure your profile for everyone — publish a grouped index in your
-  profile README for that.
-- Filtering applies to the repositories GitHub has rendered on the current
-  page, so counts are per page.
-- The API is called unauthenticated, which allows 60 requests an hour per
-  address. Responses are cached per profile for five minutes. If the limit is
-  hit, Shelf falls back to the page's truncated tags and says so in the panel
-  rather than showing numbers it cannot stand behind.
-- Chrome and Chromium browsers. The manifest is MV3; a Firefox port needs a
-  `browser_specific_settings` block.
+- Folders are visible to you only. Someone else sees GitHub's ordinary list.
+- Counts cover the repositories GitHub has rendered on the current page.
+- Private repos' topics need a signed-in API call, so a private repo can be
+  ticked in by hand but won't be matched by topic.
 
 ## Licence
 
